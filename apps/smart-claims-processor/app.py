@@ -2,171 +2,252 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import os
+import joblib
+import time
+from datetime import datetime
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.ensemble import IsolationForest
 from sklearn.pipeline import Pipeline
-from sklearn.model_selection import train_test_split
-from src.data_generator import generate_synthetic_data
+from io import StringIO
 
-# Page Configuration
+# --- CONFIGURATION ---
+MODEL_PATH = "models/trained_brain.pkl"
+CLAIMS_DB_PATH = "data/submitted_claims.csv"
+
 st.set_page_config(
-    page_title="Smart Insurance Claims AI",
+    page_title="Smart Claims Processor",
     page_icon="🛡️",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-# --- UTILS ---
-@st.cache_resource
-def load_or_train_models():
-    """
-    Trains the Multi-Modal AI System:
-    1. NLP Model for Classification
-    2. Anomaly Detection Model for Fraud
-    """
-    # 1. Load Data
-    data_path = "insurance_claims.csv"
-    if not os.path.exists(data_path):
-        with st.spinner("Generating Synthetic Data..."):
-            df = generate_synthetic_data(1000)
-            df.to_csv(data_path, index=False)
-    else:
-        df = pd.read_csv(data_path)
+# --- UTILS & MODEL LOGIC ---
 
-    # 2. Stream A: NLP For Classification (Category)
+def save_model(nlp_pipeline, iso_forest, training_meta):
+    """Persist the trained models to disk."""
+    joblib.dump({
+        'nlp': nlp_pipeline,
+        'fraud': iso_forest,
+        'meta': training_meta
+    }, MODEL_PATH)
+
+def load_model():
+    """Load the trained model from disk."""
+    if os.path.exists(MODEL_PATH):
+        return joblib.load(MODEL_PATH)
+    return None
+
+def train_system(df):
+    """
+    Trains the system on the provided dataframe.
+    Expects columns: 'Description', 'Policy_Type', 'Amount', 'Customer_Tenure'
+    """
+    # 1. NLP Training
     X_text = df['Description']
-    y_category = df['Policy_Type']
+    y_category = df['Policy_Type'] # Assumes this column exists
     
-    # Text Pipeline
     nlp_pipeline = Pipeline([
         ('vectorizer', CountVectorizer(stop_words='english')),
         ('classifier', RandomForestClassifier(n_estimators=100, random_state=42))
     ])
     nlp_pipeline.fit(X_text, y_category)
 
-    # 3. Stream B: Anomaly Detection (Fraud)
-    # Features: Amount, Customer_Tenure
-    X_numeric = df[['Amount', 'Customer_Tenure']]
+    # 2. Fraud Training (Anomaly Detection)
+    # Handle missing or different column names gracefully if possible? 
+    # For now, enforce schema or basic mapping
+    if 'Amount' in df.columns and 'Customer_Tenure' in df.columns:
+        X_numeric = df[['Amount', 'Customer_Tenure']].fillna(0)
+        iso_forest = IsolationForest(contamination=0.1, random_state=42)
+        iso_forest.fit(X_numeric)
+    else:
+        iso_forest = None
+        st.warning("⚠️ 'Amount' or 'Customer_Tenure' columns missing. Fraud detection disabled.")
+
+    # Meta
+    meta = {
+        'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        'training_count': len(df)
+    }
+
+    return nlp_pipeline, iso_forest, meta
+
+def save_claim(claim_data):
+    """Appends a new claim to the CSV file."""
+    df_new = pd.DataFrame([claim_data])
+    if not os.path.exists(CLAIMS_DB_PATH):
+        df_new.to_csv(CLAIMS_DB_PATH, index=False)
+    else:
+        df_new.to_csv(CLAIMS_DB_PATH, mode='a', header=False, index=False)
+
+def analyze_claim(model_bundle, description, amount, tenure):
+    """Run inference using the loaded model."""
+    nlp = model_bundle['nlp']
+    fraud = model_bundle['fraud']
     
-    # Contamination is approx the expected fraud rate (10%)
-    iso_forest = IsolationForest(contamination=0.1, random_state=42)
-    iso_forest.fit(X_numeric)
-
-    return nlp_pipeline, iso_forest, df
-
-def analyze_urgency(text):
-    """Simple keyword based urgency detection."""
+    # NLP
+    category = nlp.predict([description])[0]
+    
+    # Urgency (Rule-based for now, could be ML)
     urgency_keywords = ['emergency', 'severe', 'critical', 'urgent', 'immediately', 'pain', 'crash']
-    text_lower = text.lower()
-    for word in urgency_keywords:
-        if word in text_lower:
-            return "High"
-    return "Medium" # Default
+    urgency = "Medium"
+    if any(k in description.lower() for k in urgency_keywords):
+        urgency = "High"
 
-# --- APP UI ---
+    # Fraud
+    fraud_risk = "Unknown"
+    anomaly_score = 0.0
+    if fraud:
+        features = pd.DataFrame([[amount, tenure]], columns=['Amount', 'Customer_Tenure'])
+        pred = fraud.predict(features)[0]
+        anomaly_score = fraud.decision_function(features)[0]
+        if pred == -1:
+            fraud_risk = "High"
+        else:
+            fraud_risk = "Low"
+            
+    return category, urgency, fraud_risk, anomaly_score
 
-st.title("🛡️ Intelligent Insurance Claim & Fraud Guard")
-st.markdown("""
-**System Architecture:** Multi-Modal AI Analysis
-*   **Stream A (NLP):** Analyzes claim text for Categorization & Urgency.
-*   **Stream B (Anomaly):** Analyzes numerical metadata for Fraud detection.
-*   **Fusion Layer:** Combines signals for final decision.
-""")
+# --- UI COMPONENTS ---
 
-col1, col2 = st.columns([1, 2])
-
-with col1:
-    st.header("📝 Submit New Claim")
-    with st.form("claim_form"):
-        customer_id = st.text_input("Customer ID", value="CUST-8821")
-        tenure = st.slider("Customer Tenure (Years)", 0, 30, 5)
-        amount = st.number_input("Claim Amount ($)", min_value=0.0, value=1500.0, step=100.0)
-        description = st.text_area("Claim Description", height=150, 
-                                   value="I slipped in the kitchen and have severe back pain. Need physiotherapy sessions.")
-        
-        submitted = st.form_submit_button("Process Claim")
-
-if submitted:
-    # Load Brain
-    nlp_model, fraud_model, history_df = load_or_train_models()
-    
-    # --- PROCESSING ---
-    
-    # 1. Stream A: NLP Analysis
-    category_pred = nlp_model.predict([description])[0]
-    urgency_pred = analyze_urgency(description)
-    
-    # 2. Stream B: Fraud Analysis
-    # IsolationForest returns -1 for anomaly, 1 for normal
-    # We convert to a Risk Score for display (Invert logic roughly for display)
-    features = pd.DataFrame([[amount, tenure]], columns=['Amount', 'Customer_Tenure'])
-    fraud_label = fraud_model.predict(features)[0] 
-    
-    # Calculate an anomaly score (decision_function returns negative for anomalies)
-    anomaly_score = fraud_model.decision_function(features)[0]
-    
-    if fraud_label == -1:
-        fraud_risk = "High"
-        risk_color = "red"
-    else:
-        fraud_risk = "Low"
-        risk_color = "green"
-
-    # 3. Fusion Layer (The "Smart" Decision)
-    decision = "Review"
-    explanation = ""
-
-    if fraud_risk == "Low" and urgency_pred == "High":
-        decision = "Auto-Approve (Fast Track)"
-        decision_color = "green"
-        explanation = "High urgency verified and Low fraud risk detected."
-    elif fraud_risk == "High":
-        decision = "Flag for Investigation"
-        decision_color = "red"
-        explanation = "Statistical anomaly detected in Amount vs Tenure ratio."
-    else:
-        decision = "Manual Review"
-        decision_color = "orange"
-        explanation = "Standard claim processing required."
-
-    # --- DISPLAY RESULTS ---
-    with col2:
-        st.header("🧠 AI Analysis Results")
-        
-        # Metrics Top Row
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            st.metric("Predicted Category", category_pred)
-        with c2:
-            st.metric("Urgency", urgency_pred, delta="Priority" if urgency_pred=="High" else None)
-        with c3:
-            st.metric("Fraud Risk", fraud_risk, delta_color="inverse", 
-                      delta=f"Score: {anomaly_score:.2f}")
-
+def sidebar_role_select():
+    with st.sidebar:
+        st.header("👤 Role Selection")
+        role = st.radio("Access Dashboard As:", ["User (Submit Claim)", "Admin (Manage AI)"])
         st.divider()
+        st.info("Current Mode: " + role)
+        return role
 
-        # Final Decision Block
-        st.subheader("🎯 Final Fusion Decision")
-        st.markdown(f":{decision_color}-background[**{decision}**]")
-        st.caption(f"Reasoning: {explanation}")
+def render_admin_dashboard():
+    st.title("🛡️ Admin Command Center")
+    tab1, tab2 = st.tabs(["🧠 Train AI Brain", "📊 View Submitted Claims"])
+
+    with tab1:
+        st.header("Upload Training Data")
+        st.markdown("Upload a CSV file containing historical claims to retrain the categorization and fraud detection models.")
+        uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
         
-        # Detailed Debug Info
-        with st.expander("Show internal model signals"):
-            st.write(f"**NLP Data:** '{description}'")
-            st.write(f"**Structured Data:** Amount=${amount}, Tenure={tenure}yrs")
-            st.write(f"**Anomaly Score:** {anomaly_score} (Lower is more anomalous)")
+        if uploaded_file:
+            df = pd.read_csv(uploaded_file)
+            st.dataframe(df.head(), use_container_width=True)
+            st.caption(f"Loaded {len(df)} records.")
 
-        # Historical Context
-        st.subheader("📊 Historical Context (Similar Claims)")
-        # Filter for similar category
-        similar_claims = history_df[history_df['Policy_Type'] == category_pred].head(5)
-        st.dataframe(similar_claims[['Description', 'Amount', 'Is_Fraud']], use_container_width=True)
+            if st.button("🚀 Train Model Now", type="primary"):
+                with st.status("Training Multi-Modal AI System...", expanded=True) as status:
+                    st.write("Initializing NLP Pipeline...")
+                    time.sleep(1) # Dramatic effect
+                    st.write("Fitting Isolation Forest for Anomaly Detection...")
+                    
+                    try:
+                        nlp, fraud, meta = train_system(df)
+                        save_model(nlp, fraud, meta)
+                        status.update(label="Training Complete!", state="complete", expanded=False)
+                        st.success(f"Model successfully trained on {len(df)} records at {meta['timestamp']}")
+                    except Exception as e:
+                        st.error(f"Training Failed: {str(e)}")
 
+        # Check existing model status
+        existing_model = load_model()
+        if existing_model:
+            st.divider()
+            st.metric("Current Model Status", "Active", f"Trained: {existing_model['meta']['timestamp']}")
+            st.json(existing_model['meta'])
+        else:
+            st.warning("No active model found. Please train the system.")
+
+    with tab2:
+        st.header("📝 Submitted Claims Log")
+        if os.path.exists(CLAIMS_DB_PATH):
+            claims_df = pd.read_csv(CLAIMS_DB_PATH)
+            
+            # Filters
+            filter_cat = st.selectbox("Filter by Category", ["All"] + list(claims_df['Category'].unique()))
+            if filter_cat != "All":
+                claims_df = claims_df[claims_df['Category'] == filter_cat]
+            
+            st.dataframe(claims_df, use_container_width=True)
+            
+            # Analytics
+            st.subheader("Quick Review Stats")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Total Pending", len(claims_df))
+            with col2:
+                high_risk = len(claims_df[claims_df['Fraud_Risk'] == 'High'])
+                st.metric("High Risk Flags", high_risk, delta_color="inverse")
+            with col3:
+                urgency = len(claims_df[claims_df['Urgency'] == 'High'])
+                st.metric("Urgent Requests", urgency)
+
+        else:
+            st.info("No claims have been submitted yet.")
+
+def render_user_dashboard():
+    st.title("🏥 Claim Submission Portal")
+    st.markdown("Please fill out the details below as accurately as possible for faster processing.")
+
+    existing_model = load_model()
+    if not existing_model:
+        st.error("System Maintenance: Claim processing is currently unavailable (Model not loaded). Please contact support.")
+        return
+
+    with st.form("new_claim_form"):
+        col1, col2 = st.columns(2)
+        with col1:
+            customer_id = st.text_input("Customer ID / Policy Number")
+            amount = st.number_input("Estimated Claim Amount ($)", min_value=0.0, step=100.0)
+        with col2:
+            tenure = st.number_input("Years with us (Tenure)", min_value=0, max_value=50, value=1)
+            date = st.date_input("Date of Incident")
+        
+        description = st.text_area("Incident Description", height=150, placeholder="Please describe what happened in detail...")
+        
+        submitted = st.form_submit_button("Submit Claim")
+
+    if submitted:
+        if not description or amount <= 0:
+            st.warning("Please provide a description and a valid amount.")
+            return
+
+        with st.spinner("Processing Application..."):
+            # 1. Analyze immediately using the Brain
+            cat, urg, risk, score = analyze_claim(existing_model, description, amount, tenure)
+            
+            # 2. Save
+            claim_record = {
+                "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "Customer_ID": customer_id,
+                "Description": description,
+                "Amount": amount,
+                "Tenure": tenure,
+                "Category": cat,
+                "Urgency": urg,
+                "Fraud_Risk": risk,
+                "Anomaly_Score": score,
+                "Status": "Pending Review"
+            }
+            save_claim(claim_record)
+            
+            # 3. Feedback
+            time.sleep(1) # Fake processing delay
+            st.success("✅ Claim Submitted Successfully!")
+            st.balloons()
+            
+            # Optional Transparency
+            with st.expander("View Application Receipt"):
+                st.write(f"**Reference ID:** {hash(description)}")
+                st.write(f"**Detected Category:** {cat}")
+                if risk == "High":
+                    st.warning("Note: Your claim requires additional verification due to unusual parameters.")
+                else:
+                    st.info("Your claim has been fast-tracked.")
+
+
+# --- MAIN ---
+
+role = sidebar_role_select()
+
+if role.startswith("Admin"):
+    render_admin_dashboard()
 else:
-    with col2:
-        st.info("👈 Enter claim details and click Process to see the AI in action.")
-        
-        # Show some stats about the 'Brain'
-        nlp_model, fraud_model, df = load_or_train_models()
-        st.write(f"**System Status:** Trained on {len(df)} historical records.")
-        st.write(f"**Fraud Rate in Training Data:** {df['Is_Fraud'].mean()*100:.1f}%")
+    render_user_dashboard()
