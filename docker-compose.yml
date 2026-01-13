@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  server:
+    build:
+      context: ./apps/server
+    container_name: insurance-server
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./apps/server/data:/app/data
+      - ./apps/server/models:/app/models
+    environment:
+      - PORT=8000
+
+  client:
+    build:
+      context: ./apps/client
+    container_name: insurance-client
+    ports:
+      - "5173:4173" # Map host 5173 to container 4173 (preview port)
+    depends_on:
+      - server
+    environment:
+      - VITE_API_URL=http://localhost:8000 # Client browser -> Host localhost
