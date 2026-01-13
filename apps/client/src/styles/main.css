@@ -143,6 +143,16 @@ form textarea:focus {
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
+.error-border {
+  border-color: var(--color-danger) !important;
+  background-color: #FFF5F5 !important;
+}
+
+[data-theme='dark'] .error-border {
+  background-color: #450a0a !important;
+  /* Dark red background for dark mode */
+}
+
 textarea {
   resize: vertical;
   min-height: 120px;
@@ -300,17 +310,22 @@ button.secondary {
 .step.active span {
   color: var(--color-accent);
 }
+
 .btn-soft-blue {
   display: inline-block;
-  background-color: #6495ED; /* Cornflower Blue */
+  background-color: #6495ED;
+  /* Cornflower Blue */
   color: white;
   padding: 10px 20px;
   text-decoration: none;
   border-radius: 6px;
   font-family: sans-serif;
   transition: background-color 0.2s ease;
-  margin-right: 10px; /* Space between buttons */
+  margin-right: 10px;
+  /* Space between buttons */
 }
+
 .btn-soft-blue:hover {
-  background-color: #4169E1; /* Slightly darker on hover */
+  background-color: #4169E1;
+  /* Slightly darker on hover */
 }
