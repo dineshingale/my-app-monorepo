@@ -16,8 +16,8 @@ export default function Navbar() {
     <nav className="navbar">
       <div className="logo">InsuranceClaimFusion AI</div>
       <div className="nav-links" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-        <a href="/">Submit Claim</a>
-        <a href="/admin">Admin</a>
+        <a href="/" className="btn-soft-blue">Submit Claim</a>
+        <a href="/admin" className="btn-soft-blue">Admin</a>
         <button
           onClick={toggleTheme}
           className="secondary"

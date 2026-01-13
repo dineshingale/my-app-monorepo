@@ -300,3 +300,17 @@ button.secondary {
 .step.active span {
   color: var(--color-accent);
 }
+.btn-soft-blue {
+  display: inline-block;
+  background-color: #6495ED; /* Cornflower Blue */
+  color: white;
+  padding: 10px 20px;
+  text-decoration: none;
+  border-radius: 6px;
+  font-family: sans-serif;
+  transition: background-color 0.2s ease;
+  margin-right: 10px; /* Space between buttons */
+}
+.btn-soft-blue:hover {
+  background-color: #4169E1; /* Slightly darker on hover */
+}
