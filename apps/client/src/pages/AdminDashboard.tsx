@@ -11,13 +11,13 @@ export default function AdminDashboard() {
 
         switch (subTab) {
             case 'fraud':
-                filtered = claims.filter(c => (c.authenticity_score !== undefined && c.authenticity_score <= 3) || c.Fraud_Risk === 'High');
+                filtered = claims.filter(c => (c.authenticity_score !== undefined && c.authenticity_score !== "" && c.authenticity_score <= 3) || c.Fraud_Risk === 'High');
                 break;
             case 'manual':
-                filtered = claims.filter(c => (c.authenticity_score === undefined) || (c.authenticity_score > 3 && c.authenticity_score < 7));
+                filtered = claims.filter(c => (c.authenticity_score === undefined || c.authenticity_score === "") || (c.authenticity_score > 3 && c.authenticity_score < 7));
                 break;
             case 'authentic':
-                filtered = claims.filter(c => c.authenticity_score !== undefined && c.authenticity_score >= 7);
+                filtered = claims.filter(c => c.authenticity_score !== undefined && c.authenticity_score !== "" && c.authenticity_score >= 7);
                 break;
         }
 
