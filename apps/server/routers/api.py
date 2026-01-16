@@ -73,3 +73,27 @@ def get_model_status():
     if existing_model:
         return {"active": True, "meta": existing_model['meta']}
     return {"active": False, "meta": None}
+
+@router.delete("/claims")
+def delete_claim(customer_id: str, timestamp: str):
+    if not os.path.exists(CLAIMS_DB_PATH):
+        raise HTTPException(status_code=404, detail="No claims database found")
+    
+    try:
+        df = pd.read_csv(CLAIMS_DB_PATH)
+        # Ensure correct data types for comparison
+        df['Customer_ID'] = df['Customer_ID'].astype(str)
+        df['Timestamp'] = df['Timestamp'].astype(str)
+        
+        # Filter
+        mask = (df['Customer_ID'] == customer_id) & (df['Timestamp'] == timestamp)
+        
+        if not mask.any():
+             raise HTTPException(status_code=404, detail="Claim not found")
+             
+        df = df[~mask]
+        df.to_csv(CLAIMS_DB_PATH, index=False)
+        return {"message": "Claim deleted successfully"}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error deleting claim: {str(e)}")
