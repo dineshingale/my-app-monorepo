@@ -166,6 +166,15 @@ def render_admin_dashboard():
                 claims_df = claims_df[claims_df['Category'] == filter_cat]
             
             st.dataframe(claims_df, use_container_width=True)
+
+            # Export to CSV
+            csv = claims_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Download as CSV",
+                data=csv,
+                file_name=f"claims_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+            )
             
             # Analytics
             st.subheader("Quick Review Stats")

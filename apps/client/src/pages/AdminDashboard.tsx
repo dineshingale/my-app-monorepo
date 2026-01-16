@@ -139,6 +139,42 @@ export default function AdminDashboard() {
                     <div>
                         <div className="flex mb-4 justify-between items-center">
                             <h3>Submitted Claims Log</h3>
+                            <button
+                                onClick={() => {
+                                    const data = getFilteredClaims();
+                                    if (data.length === 0) {
+                                        alert("No claims to export.");
+                                        return;
+                                    }
+                                    const headers = Object.keys(data[0]);
+                                    const csvContent = [
+                                        headers.join(","),
+                                        ...data.map(row => headers.map(fieldName => JSON.stringify(row[fieldName], (key, value) => value === null ? "" : value)).join(","))
+                                    ].join("\n");
+
+                                    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+                                    const url = URL.createObjectURL(blob);
+                                    const link = document.createElement("a");
+                                    link.setAttribute("href", url);
+                                    link.setAttribute("download", `claims_export_${new Date().toISOString().slice(0, 19).replace(/:/g, "")}.csv`);
+                                    link.style.visibility = 'hidden';
+                                    document.body.appendChild(link);
+                                    link.click();
+                                    document.body.removeChild(link);
+                                }}
+                                style={{
+                                    padding: '0.5rem 1rem',
+                                    fontSize: '0.9rem',
+                                    width: 'auto',
+                                    backgroundColor: '#10B981',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '0.5rem',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                📥 Export to CSV
+                            </button>
                         </div>
 
                         {/* CLASSIFICATION TABS */}
